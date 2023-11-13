@@ -14,7 +14,7 @@ def main(image_path, east_path='frozen_east_text_detection.pb', min_confidence=0
         
     # Read the image again to apply blurring because east_text_detection does not return the image
     image = cv2.imread(image_path)
-
+    
     # Apply blurring on the detected text areas
     blur_function(image, boxes)
     
