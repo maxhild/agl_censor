@@ -13,7 +13,7 @@ AGL Censor is a comprehensive Python module designed for image processing with s
 
 To get started with AGL Censor, clone this repository and install the required dependencies.
 
-git clone https://github.com/yourusername/agl_censor.git
+git clone https://github.com/maxhild/agl_censor.git
 cd agl_censor
 pip install -r requirements.txt
 Usage
@@ -27,8 +27,9 @@ Configure Settings: Adjust the settings in the configuration file (if applicable
 Run the Module: Execute the main script to process the images.
 bash
 Copy code
-python main.py
-Modules
+python main.py --image images/lebron_james.jpg --east frozen_east_text_detection.pb 
+
+## Modules
 
 AGL Censor is comprised of several key modules:
 
