@@ -2,7 +2,8 @@ import cv2
 from east_as_a_function import east_text_detection
 from censor import blur_function
 from PIL import Image
-from transformers_ocr import process_files
+from transformers_ocr import process_images_with_OCR_and_NER
+from names_gen import gender_and_handle_names
 import uuid
 import os
 
@@ -17,6 +18,7 @@ def main(image_path, east_path='frozen_east_text_detection.pb', min_confidence=0
     
     # Apply blurring on the detected text areas
     blur_function(image, boxes)
+    gender_and_handle_names(image, boxes)
     
     # Optionally save or display the blurred image
     cv2.imwrite('blurred_image.jpg', image)
@@ -53,7 +55,9 @@ def crop_and_save(image_path, boxes):
             cropped_img.save(cropped_img_path)
             cropped_image_paths.append(cropped_img_path)
 
-            image_text = process_files(cropped_img_path)
+            image_text = process_images_with_OCR_and_NER(cropped_img_path, boxes)
+            
+            #gender_and_handle_names(words, cropped_image_path, idx, index=0)
 
             # Generate a unique ID for the extracted text
             unique_id = str(uuid.uuid4())

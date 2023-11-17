@@ -1,6 +1,8 @@
 from transformers import pipeline
 from transformers import ViTImageProcessor, VisionEncoderDecoderModel
 from PIL import Image, ImageEnhance, ImageFilter
+from flair_NER import NER_German
+from names_gen import gender_and_handle_names
 import fitz
 import os
 import cv2
@@ -14,10 +16,9 @@ pipe = pipeline("image-to-text", model="microsoft/trocr-large-str")
 
 
 
-def process_files(file_path):
+def process_images_with_OCR_and_NER(file_path, boxes):
     results = []
     print("Processing file:", file_path)
-
 
     with open(file_path, 'rb') as file:
         filename = file_path
@@ -37,39 +38,51 @@ def process_files(file_path):
         if file_type not in ['jpg', 'jpeg', 'png', 'pdf', 'tiff']:
             raise ValueError('Invalid file type.')
 
-        if file_type == 'pdf':
-            pdf_data = file.read()
-            images = convert_pdf_to_images(pdf_data)
-            extracted_text = ''
+        names = ''  # Initialize 'names' here
+        extracted_text = ''
 
+        if file_type == 'pdf':
+            # Process each page of the PDF
             for img in images:
-                img = process_image(img)
-                if img is None or img.size == (0, 0):
-                    raise ValueError("Failed to convert PDF page to image")
-                text = pipe(img)
+                # ... existing image processing code ...
+                text = pipe(img)  # OCR
                 extracted_text += text
-            extracted_text = process_text(extracted_text)
+                # Process text and perform NER
+                extracted_text = process_text(extracted_text)
+                names = NER_German(extracted_text)
+                # Call name replacement function
+                modified_img = replace_names_in_image(img, names, boxes)  # Function to be implemented
+                # Save or process modified_img as needed
         else:
             image = Image.open(file_path)
-            #image = process_image(image)
-
+            # ... existing image processing code ...
             try:
                 extracted_text = pipe(image)
             except Exception as e:
                 print(f"An error occurred during OCR processing: {e}")
                 extracted_text = ""  
-
             extracted_text = process_text(extracted_text)
+            extracted_text = [item['generated_text'] for item in extracted_text if 'generated_text' in item]
+            for text in extracted_text:
+                text = process_text(text)
+                names.= NER_German(str(text))
+            names = NER_German(extracted_text)
+            # Call name replacement function
+            modified_img = gender_and_handle_names(image, names, boxes)  # Function to be implemented
+            # Save or process modified_img as needed
+      
 
         result = {
             'filename': filename,
             'file_type': file_type,
             'extracted_text': extracted_text,
+            'name_detected': names
         }
         results.append(result)
         print("text detected:", result)
 
     return results
+
 
 def download_model(model_name):
     spacy.cli.download(model_name)
