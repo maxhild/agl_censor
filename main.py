@@ -7,26 +7,38 @@ from names_gen import gender_and_handle_names
 import uuid
 import os
 
-def main(image_path, east_path='frozen_east_text_detection.pb', min_confidence=0.5, width=320, height=320):
-    # Perform text detection
-    boxes = east_text_detection(image_path, east_path, min_confidence, width, height)
-    #original_image = cv2.imread(image_path)
-    #original_height, original_width = original_image.shape[:2]
+def reassemble_image(original_image_path, boxes, modified_images_map):
+    original_image = cv2.imread(original_image_path)
+    
+    for box, modified_image_path in modified_images_map.items():
+        modified_image = cv2.imread(modified_image_path)
         
-    # Read the image again to apply blurring because east_text_detection does not return the image
-    image = cv2.imread(image_path)
+        # Resize modified image to fit the box
+        (startX, startY, endX, endY) = box
+        resized_image = cv2.resize(modified_image, (endX - startX, endY - startY))
+
+        # Replace the box area with the resized image
+        original_image[startY:endY, startX:endX] = resized_image
+
+    # Save or return the reassembled image
+    reassembled_image_path = os.path.join(os.path.dirname(original_image_path), "reassembled_image.jpg")
+    cv2.imwrite(reassembled_image_path, original_image)
+    return reassembled_image_path
+
+def main(image_path, east_path='frozen_east_text_detection.pb', min_confidence=0.5, width=320, height=320):
     
-    # Apply blurring on the detected text areas
-    blur_function(image, boxes)
-    gender_and_handle_names(image, boxes)
-    
-    # Optionally save or display the blurred image
-    cv2.imwrite('blurred_image.jpg', image)
-    print(image_path)
-    crop_and_save(image_path, boxes)
-    # cv2.imshow('Blurred Image', image)
-    # cv2.waitKey(0)
-    # cv2.destroyAllWindows()
+    # Process images with OCR and NER, and get modified images map
+    results, modified_images_map, boxes = process_images_with_OCR_and_NER(image_path, east_path, min_confidence, width, height)
+    print("Images processed")
+
+    #east_path
+    # Crop images based on boxes and save them
+    #cropped_image_paths = crop_and_save(image_path, boxes)
+    # Reassemble the image with the modified areas
+    reassembled_image_path = reassemble_image(image_path, boxes, modified_images_map)
+    print("Reassembled image saved to:", reassembled_image_path)
+    print(results)
+
     
 def crop_and_save(image_path, boxes):
     cropped_image_paths = []
@@ -55,7 +67,6 @@ def crop_and_save(image_path, boxes):
             cropped_img.save(cropped_img_path)
             cropped_image_paths.append(cropped_img_path)
 
-            image_text = process_images_with_OCR_and_NER(cropped_img_path, boxes)
             
             #gender_and_handle_names(words, cropped_image_path, idx, index=0)
 
@@ -63,13 +74,13 @@ def crop_and_save(image_path, boxes):
             unique_id = str(uuid.uuid4())
 
             # Save the extracted text and its unique ID in the dictionary
-            image_texts[unique_id] = {'path': cropped_img_path, 'text': image_text}
+            image_texts[unique_id] = {'path': cropped_img_path}
 
             # Optionally, print or save the image path, text, and unique ID to a file
-            print(f"Cropped image saved to: {cropped_img_path}, text: {image_text}, ID: {unique_id}")
+            print(f"Cropped image saved to: {cropped_img_path}, ID: {unique_id}")
 
     # Return both the paths and the text with unique IDs
-    return cropped_image_paths, image_texts
+    return cropped_image_paths
 
 
 if __name__ == "__main__":
@@ -79,7 +90,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("-i", "--image", type=str, required=True,
                     help="path to input image")
-    ap.add_argument("-east", "--east", type=str, required=True,
+    ap.add_argument("-east", "--east", type=str, required=False,
                     help="path to input EAST text detector")
     ap.add_argument("-c", "--min-confidence", type=float, default=0.5,
                     help="minimum probability required to inspect a region")

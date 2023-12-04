@@ -6,9 +6,9 @@ import cv2
 
 def east_text_detection(image_path, east_path='frozen_east_text_detection.pb', min_confidence=0.5, width=320, height=320):
     # load the input image and grab the image dimensions
-    image = cv2.imread(image_path)
-    orig = image.copy()
-    (origH, origW) = image.shape[:2]
+    orig = cv2.imread(image_path)
+    #orig = image.copy()
+    (origH, origW) = orig.shape[:2]
 
     # set the new width and height and then determine the ratio in change
     # for both the width and height
@@ -17,7 +17,7 @@ def east_text_detection(image_path, east_path='frozen_east_text_detection.pb', m
     rH = origH / float(newH)
 
     # resize the image and grab the new image dimensions
-    image = cv2.resize(image, (newW, newH))
+    image = cv2.resize(orig, (newW, newH))
     (H, W) = image.shape[:2]
 
     # define the two output layer names for the EAST detector model that
@@ -28,7 +28,7 @@ def east_text_detection(image_path, east_path='frozen_east_text_detection.pb', m
 
     # load the pre-trained EAST text detector
     print("[INFO] loading EAST text detector...")
-    net = cv2.dnn.readNet(east_path)
+    net = cv2.dnn.readNet("frozen_east_text_detection.pb")
 
     blob = cv2.dnn.blobFromImage(image, 1.0, (W, H),
                                 (123.68, 116.78, 103.94), swapRB=True, crop=False)
@@ -102,13 +102,29 @@ def east_text_detection(image_path, east_path='frozen_east_text_detection.pb', m
         endY = int(endY * rH)
 
         # Draw the bounding box on the original image
-        #cv2.rectangle(orig, (startX, startY), (endX, endY), (0, 255, 0), 2)
+        cv2.rectangle(orig, (startX, startY), (endX, endY), (0, 255, 0), 2)
+
         
         # append the scaled bounding box to the list of output boxes
         output_boxes.append((startX, startY, endX, endY))
 
     # return the scaled bounding boxes
+    cv2.imshow("Text Detection", orig)
+    #cv2.waitKey(0)
+    output_boxes = sort_boxes(output_boxes)
+
     return output_boxes
+
+def sort_boxes(boxes):
+    # Define a threshold to consider boxes on the same line
+    vertical_threshold = 10
+
+    # Sort boxes by y coordinate, then by x coordinate if y coordinates are similar
+    boxes.sort(key=lambda b: (round(b[1] / vertical_threshold), b[0]))
+
+    return boxes
+
+
 
 # if this script is the main script being run, parse command line args and run
 if __name__ == "__main__":

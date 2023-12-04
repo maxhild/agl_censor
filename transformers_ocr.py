@@ -4,101 +4,168 @@ from PIL import Image, ImageEnhance, ImageFilter
 from flair_NER import NER_German
 from names_gen import gender_and_handle_names
 import fitz
+import tempfile
+from east_as_a_function import east_text_detection
+#from tesseract_as_a_function import tesseract_text_detection
+from names_finder import create_combined_phrases
 import os
 import cv2
 import numpy as np
 import spacy
+import tempfile
 import re
+import streamlit as st
+
 
 processor = ViTImageProcessor.from_pretrained('microsoft/trocr-large-str')
 model = VisionEncoderDecoderModel.from_pretrained('microsoft/trocr-large-str')
 pipe = pipeline("image-to-text", model="microsoft/trocr-large-str")
 
+# new function to perform OCR only on the Boxes provided by EAST
+
+def ocr_on_boxes(image_path, boxes):
+    image = Image.open(image_path)
+    extracted_text_with_boxes = []
+    
+    for box in boxes:
+
+        (startX, startY, endX, endY) = box
+        cropped_image = image.crop((startX, startY, endX, endY))
+        text = pipe(cropped_image)
+        print(text)  # See what this output looks like
+        #text = pipe(cropped_image)['generated_text']  # Using TROCR on the cropped image
+        extracted_text_with_boxes.append((text, box))
+        print(f"Box: ", box)
 
 
-def process_images_with_OCR_and_NER(file_path, boxes):
-    results = []
+    return extracted_text_with_boxes
+
+
+def convert_pdf_to_images(pdf_data):
+    image_paths = []
+
+    try:
+        # Open the PDF file from the byte stream
+        with fitz.open(stream=pdf_data, filetype="pdf") as doc:
+            for i, page in enumerate(doc):
+                pix = page.get_pixmap()
+                img = Image.frombuffer("RGB", [pix.width, pix.height], pix.samples, "raw", "RGB", 0, 1)
+
+                # Create a temporary file for the image
+                temp_file_path = None
+                with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp_file:
+                    img.save(temp_file, format="PNG")
+                    temp_file_path = temp_file.name
+
+                if temp_file_path:
+                    image_paths.append(temp_file_path)
+                    print(f"Converted page {i+1} to image: {temp_file_path}")
+                else:
+                    print(f"Failed to convert page {i+1} to image.")
+
+    except Exception as e:
+        print(f"An error occurred during PDF conversion: {e}")
+
+    return image_paths
+
+
+def process_images_with_OCR_and_NER(file_path, east_path='frozen_east_text_detection.pb', min_confidence=0.5, width=320, height=320):
     print("Processing file:", file_path)
 
-    with open(file_path, 'rb') as file:
-        filename = file_path
-        file_extension = filename.split('.')[-1].lower()
+    # Initialize variables
+    modified_images_map = {}
+    names_detected = []
+    extracted_text = ''
 
-        mime_types = {
-            'jpg': 'image/jpeg',
-            'jpeg': 'image/jpeg',
-            'png': 'image/png',
-            'gif': 'image/gif',
-            'bmp': 'image/bmp',
-            'tiff': 'image/tiff',
-            'pdf': 'application/pdf',
-        }
+    # Determine the file type
+    file_extension = file_path.split('.')[-1].lower()
+    mime_types = {
+        'jpg': 'image/jpeg',
+        'jpeg': 'image/jpeg',
+        'png': 'image/png',
+        'gif': 'image/gif',
+        'bmp': 'image/bmp',
+        'tiff': 'image/tiff',
+        'pdf': 'application/pdf',
+    }
+    file_type = mime_types.get(file_extension, 'application/octet-stream').split('/')[-1]
 
-        file_type = mime_types.get(file_extension, 'application/octet-stream').split('/')[-1]
-        if file_type not in ['jpg', 'jpeg', 'png', 'pdf', 'tiff']:
-            raise ValueError('Invalid file type.')
+    if file_type not in ['jpg', 'jpeg', 'png', 'pdf', 'tiff']:
+        raise ValueError('Invalid file type.')
 
-        names = ''  # Initialize 'names' here
-        extracted_text = ''
+    if file_type == 'pdf':
+        image_paths = []
 
-        if file_type == 'pdf':
-            # Process each page of the PDF
-            for img in images:
-                # ... existing image processing code ...
-                text = pipe(img)  # OCR
-                extracted_text += text
-                # Process text and perform NER
-                extracted_text = process_text(extracted_text)
-                names = NER_German(extracted_text)
-                # Call name replacement function
-                modified_img = replace_names_in_image(img, names, boxes)  # Function to be implemented
-                # Save or process modified_img as needed
-        else:
-            image = Image.open(file_path)
-            # ... existing image processing code ...
-            try:
-                extracted_text = pipe(image)
-            except Exception as e:
-                print(f"An error occurred during OCR processing: {e}")
-                extracted_text = ""  
-            extracted_text = process_text(extracted_text)
-            extracted_text = [item['generated_text'] for item in extracted_text if 'generated_text' in item]
-            for text in extracted_text:
-                text = process_text(text)
-                names.= NER_German(str(text))
-            names = NER_German(extracted_text)
-            # Call name replacement function
-            modified_img = gender_and_handle_names(image, names, boxes)  # Function to be implemented
-            # Save or process modified_img as needed
-      
+        # Open the PDF file from the file path
+        with open(file_path, 'rb') as pdf_file:
+            pdf_data = pdf_file.read()
 
-        result = {
-            'filename': filename,
-            'file_type': file_type,
-            'extracted_text': extracted_text,
-            'name_detected': names
-        }
-        results.append(result)
-        print("text detected:", result)
+            # Convert the entire PDF to images
+            image_paths = convert_pdf_to_images(pdf_data)
 
-    return results
+            # Open the PDF again for text extraction
+            with fitz.open(stream=pdf_data, filetype="pdf") as doc:
+                text = ""
+                for page in doc:
+                    text += page.get_text()
+                print(text)  # Use print or st.write(text) depending on your output preference
 
+    
+        """ 
+        with open(file_path, 'rb') as doc:
+            text = ""
+            for page in doc:
+                image_paths = convert_pdf_to_images(page)
+                text += page.getText()
+            print(text)
+        """  
 
-def download_model(model_name):
-    spacy.cli.download(model_name)
+        for img_path in image_paths:
+            print("pdf split into images")
+            boxes = east_text_detection(img_path, east_path, min_confidence, width, height)
+            print("Text boxes detected")
 
-#os.environ['TESSDATA_PREFIX'] = '/opt/homebrew/share/tessdata'
-#pytesseract.pytesseract.tesseract_cmd = '/opt/homebrew/bin/tesseract'
-#tessdata_dir_config = '--tessdata-dir "/opt/homebrew/share/tessdata"'
+            extracted_text_with_boxes = ocr_on_boxes(img_path, boxes)
+            combined_phrases = create_combined_phrases(extracted_text_with_boxes)
+
+            for phrase, phrase_box in combined_phrases:
+                processed_text = process_text(phrase)
+                entities = NER_German(processed_text)
+                for entity in entities:
+                    if entity.tag == 'PER':
+                        modified_img_path = gender_and_handle_names(processed_text, file_path, phrase_box)
+                        modified_images_map[phrase_box] = modified_img_path
+                        names_detected.append(entity.text)
 
 
-# load a spaCy model
-#try:
-#    nlp = spacy.load("de_core_news_lg")
-#except OSError:
-#    print("Model not found. Downloading...")
-#    download_model("de_core_news_lg")
-#    nlp = spacy.load("de_core_news_lg")
+    else:
+            boxes = east_text_detection(file_path, east_path, min_confidence, width, height)
+            print("Text boxes detected")
+
+            extracted_text_with_boxes = ocr_on_boxes(file_path, boxes)
+            combined_phrases = create_combined_phrases(extracted_text_with_boxes)
+
+        
+            for phrase, phrase_box in combined_phrases:
+                processed_text = process_text(phrase)
+                entities = NER_German(processed_text)
+                if entities:
+                    for entity in entities:
+                        if entity.tag == 'PER':
+                            modified_img_path = gender_and_handle_names(processed_text, file_path, phrase_box)
+                            modified_images_map[phrase_box] = modified_img_path
+                            names_detected.append(entity.text)
+
+    result = {
+        'filename': file_path,
+        'file_type': file_type,
+        'extracted_text': extracted_text,
+        'names_detected': names_detected,
+        #'Boxes': boxes
+    }
+
+    print("Text detected:", result)
+    return result, modified_images_map, boxes
 
 
 def run_script():
@@ -180,16 +247,18 @@ def process_image(image, use_mock=False):
 
 def convert_pdf_to_images(pdf_data):
     doc = fitz.open(stream=pdf_data, filetype="pdf")
-    images = []
+    image_paths = []
 
-    for page in doc:
+    for i, page in enumerate(doc):
         pix = page.get_pixmap()
         img = Image.frombuffer("RGB", [pix.width, pix.height], pix.samples, "raw", "RGB", 0, 1)
 
-        images.append(img)
-        
-    return images
+        # Save the image to a temporary file
+        temp_file = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+        img.save(temp_file, format="PNG")
+        image_paths.append(temp_file.name)
 
+    return image_paths
 def scale_coordinates(coords, image_size):
     # Convert the fractional coordinates into actual pixel values
     left = coords['left'] * image_size[0]
