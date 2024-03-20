@@ -3,6 +3,8 @@ from imutils.object_detection import non_max_suppression
 import numpy as np
 import time
 import cv2
+from color_picker_avg import extend_boxes_if_needed
+
 
 def east_text_detection(image_path, east_path='frozen_east_text_detection.pb', min_confidence=0.5, width=320, height=320):
     # load the input image and grab the image dimensions
@@ -109,9 +111,11 @@ def east_text_detection(image_path, east_path='frozen_east_text_detection.pb', m
         output_boxes.append((startX, startY, endX, endY))
 
     # return the scaled bounding boxes
-    cv2.imshow("Text Detection", orig)
+    #cv2.imshow("Text Detection", orig)
     #cv2.waitKey(0)
     output_boxes = sort_boxes(output_boxes)
+    
+    output_boxes = extend_boxes_if_needed(orig, output_boxes)
 
     return output_boxes
 

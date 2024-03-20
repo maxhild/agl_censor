@@ -7,7 +7,7 @@ import fitz
 import tempfile
 from east_as_a_function import east_text_detection
 #from tesseract_as_a_function import tesseract_text_detection
-from names_finder import create_combined_phrases
+from phrase_combination import create_combined_phrases
 import os
 import cv2
 import numpy as np
@@ -26,17 +26,24 @@ pipe = pipeline("image-to-text", model="microsoft/trocr-large-str")
 def ocr_on_boxes(image_path, boxes):
     image = Image.open(image_path)
     extracted_text_with_boxes = []
-    
-    for box in boxes:
 
+    for box in boxes:
         (startX, startY, endX, endY) = box
         cropped_image = image.crop((startX, startY, endX, endY))
-        text = pipe(cropped_image)
-        print(text)  # See what this output looks like
-        #text = pipe(cropped_image)['generated_text']  # Using TROCR on the cropped image
-        extracted_text_with_boxes.append((text, box))
-        print(f"Box: ", box)
 
+        # Process cropped image with the OCR pipeline
+        ocr_results = pipe(cropped_image, max_new_tokens=50)
+
+        # Initialize an empty string to store concatenated text
+        concatenated_text = ''
+
+        # Iterate over each result and concatenate the 'generated_text'
+        for result in ocr_results:
+            if 'generated_text' in result:
+                concatenated_text += ' ' + result['generated_text']
+
+        # Append the concatenated text and corresponding box to the list
+        extracted_text_with_boxes.append((concatenated_text.strip(), box))
 
     return extracted_text_with_boxes
 
@@ -68,8 +75,89 @@ def convert_pdf_to_images(pdf_data):
 
     return image_paths
 
+def modify_text_region(image_path, box, new_text):
+    image = cv2.imread(image_path)
+    (startX, startY, endX, endY) = box
+
+    # Crop to the text region
+    cropped_region = image[startY:endY, startX:endX]
+
+    # Apply modifications to the cropped region (e.g., overlay new text)
+    # This is simplified; you'd include your actual text overlay logic here
+    cv2.putText(cropped_region, new_text, (0, 0), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+    # Optional: If you want to overlay the modified region back onto the original image
+    image[startY:endY, startX:endX] = cropped_region
+
+    # Save the modified image/cropped region as needed
+    modified_image_path = "path_to_save_modified_image.jpg"
+    cv2.imwrite(modified_image_path, image)  # or cropped_region if you're only interested in the text area
+
+    return modified_image_path
+
 
 def process_images_with_OCR_and_NER(file_path, east_path='frozen_east_text_detection.pb', min_confidence=0.5, width=320, height=320):
+    print("Processing file:", file_path)
+
+    # Initialize variables
+    modified_images_map = {}
+    names_detected = []
+    extracted_text = ''
+
+    # Determine the file type
+    file_extension = file_path.split('.')[-1].lower()
+    mime_types = {
+        'jpg': 'image/jpeg',
+        'jpeg': 'image/jpeg',
+        'png': 'image/png',
+        'gif': 'image/gif',
+        'bmp': 'image/bmp',
+        'tiff': 'image/tiff',
+    }
+    file_type = mime_types.get(file_extension, 'application/octet-stream').split('/')[-1]
+
+    if file_type not in ['jpg', 'jpeg', 'png', 'tiff']:
+        raise ValueError('Invalid file type.')
+
+    # Check file existence
+    if os.path.exists(file_path):
+        print("File exists, processing.")
+    else:
+        raise ValueError("File does not exist or could not be found.")
+
+    # Detect text boxes
+    boxes = east_text_detection(file_path, east_path, min_confidence, width, height)
+    print("Text boxes detected")
+
+    # Perform OCR on detected boxes
+    extracted_text_with_boxes = ocr_on_boxes(file_path, boxes)
+    #combined_phrases = create_combined_phrases(extracted_text_with_boxes)
+
+    for phrase, phrase_box in extracted_text_with_boxes:
+        processed_text = process_text(phrase)
+        entities = NER_German(processed_text)
+        # Ensure entities is iterable even when NER_German returns None
+        if entities is None:
+            entities = []
+
+        for entity in entities:
+            if entity.tag == 'PER':
+                # Your existing code for handling each entity...
+                box_to_image_map = gender_and_handle_names([entity.text], phrase_box, file_path)
+                modified_images_map.update(box_to_image_map)
+    # Prepare and print the result
+    result = {
+        'filename': file_path,
+        'file_type': file_type,
+        'extracted_text': extracted_text,
+        'names_detected': names_detected,
+        'Boxes': boxes
+    }
+
+    print("Text detected:", modified_images_map)
+    return modified_images_map, boxes
+
+def _process_images_with_OCR_and_NER(file_path, east_path='frozen_east_text_detection.pb', min_confidence=0.5, width=320, height=320):
     print("Processing file:", file_path)
 
     # Initialize variables
@@ -125,8 +213,8 @@ def process_images_with_OCR_and_NER(file_path, east_path='frozen_east_text_detec
             boxes = east_text_detection(img_path, east_path, min_confidence, width, height)
             print("Text boxes detected")
 
-            extracted_text_with_boxes = ocr_on_boxes(img_path, boxes)
-            combined_phrases = create_combined_phrases(extracted_text_with_boxes)
+            combined_phrases = ocr_on_boxes(img_path, boxes)
+            #combined_phrases = create_combined_phrases(extracted_text_with_boxes)
 
             for phrase, phrase_box in combined_phrases:
                 processed_text = process_text(phrase)
@@ -142,8 +230,8 @@ def process_images_with_OCR_and_NER(file_path, east_path='frozen_east_text_detec
             boxes = east_text_detection(file_path, east_path, min_confidence, width, height)
             print("Text boxes detected")
 
-            extracted_text_with_boxes = ocr_on_boxes(file_path, boxes)
-            combined_phrases = create_combined_phrases(extracted_text_with_boxes)
+            combined_phrases = ocr_on_boxes(file_path, boxes)
+            #combined_phrases = create_combined_phrases(extracted_text_with_boxes)
 
         
             for phrase, phrase_box in combined_phrases:
@@ -165,7 +253,8 @@ def process_images_with_OCR_and_NER(file_path, east_path='frozen_east_text_detec
     }
 
     print("Text detected:", result)
-    return result, modified_images_map, boxes
+    return modified_images_map, boxes
+
 
 
 def run_script():
@@ -259,6 +348,7 @@ def convert_pdf_to_images(pdf_data):
         image_paths.append(temp_file.name)
 
     return image_paths
+
 def scale_coordinates(coords, image_size):
     # Convert the fractional coordinates into actual pixel values
     left = coords['left'] * image_size[0]
